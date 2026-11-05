@@ -139,6 +139,50 @@ def test_chain_getting_shorter_rolls_back_once_a_competing_block_appears(session
     assert staked(sessions, BOB) == E18
 
 
+def test_fork_below_our_tip_is_caught_before_the_chain_regrows(sessions):
+    chain = FakeChain()
+    for _ in range(5):
+        chain.mine(("Staked", ALICE, E18))
+    indexer = make_indexer(sessions, chain)
+    drain(indexer)
+
+    chain.fork_from(2)
+    chain.mine(("Staked", BOB, E18))  # Height 3, while our tip is still at 5.
+    result = indexer.sync_once()
+
+    assert result.reorgs == 1
+    assert staked(sessions, ALICE) == 2 * E18
+    assert staked(sessions, BOB) == E18
+
+
+def test_fork_landing_in_the_middle_of_a_sync_leaves_no_orphaned_events(sessions):
+    class ForksDuringSync(FakeChain):
+        fork_when_reading: str | None = None
+
+        def events(self, block_hash):
+            events = super().events(block_hash)
+            if block_hash == self.fork_when_reading:
+                self.fork_when_reading = None
+                self.fork_from(3)
+                self.mine(("Staked", BOB, 2 * E18))
+                self.mine(("Staked", BOB, 3 * E18))
+            return events
+
+    chain = ForksDuringSync()
+    for _ in range(3):
+        chain.mine(("Staked", ALICE, E18))
+    indexer = make_indexer(sessions, chain)
+    drain(indexer)
+
+    orphan = chain.mine(("Staked", ALICE, 100 * E18))  # Block 4, stored just before the fork.
+    chain.mine(("Staked", ALICE, 100 * E18))
+    chain.fork_when_reading = orphan.hash
+    drain(indexer)
+
+    assert staked(sessions, ALICE) == 3 * E18
+    assert staked(sessions, BOB) == 5 * E18
+
+
 def test_lagging_backup_node_is_not_mistaken_for_a_reorg(sessions):
     chain = FakeChain()
     for _ in range(5):

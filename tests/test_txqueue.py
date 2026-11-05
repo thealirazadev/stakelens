@@ -161,8 +161,13 @@ def test_reorged_transaction_is_sent_again_and_lands_once(sessions, w3, deployed
     w3.provider.make_request("evm_revert", [fork_point])
     assert balance(deployed) == 0
 
+    w3.provider.make_request("evm_setAutomine", [False])
     worker.tick()  # No receipt any more, so it goes back to pending and is rebroadcast.
-    assert status(sessions, "reorg").status in ("pending", "mined")
+    tx = status(sessions, "reorg")
+    assert (tx.status, tx.winning_hash, tx.mined_block) == ("pending", None, None)
+
+    w3.provider.make_request("evm_setAutomine", [True])
+    mine(w3)
     run_until(worker, sessions, "reorg", "mined")
     mine(w3, 2)
     run_until(worker, sessions, "reorg", "confirmed")
