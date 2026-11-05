@@ -5,7 +5,7 @@ from typing import Annotated
 
 import anthropic
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ from web3 import Web3
 from app import assistant, auth, queries
 from app.config import Settings, get_settings
 from app.db import make_engine, make_session_factory
+from app.metrics import render_database_metrics
 
 log = logging.getLogger("stakelens.api")
 WEB_DIR = Path(__file__).parent / "web"
@@ -92,6 +93,14 @@ def create_app(
             "last_indexed_block": stats["last_indexed_block"],
             "blocks_behind": stats["blocks_behind"],
         }
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics(session: Db) -> Response:
+        return Response(render_database_metrics(session), media_type="text/plain; version=0.0.4")
+
+    @app.get("/vault/reconciliation")
+    def vault_reconciliation(session: Db) -> dict | None:
+        return queries.latest_reconciliation(session)
 
     @app.get("/vault/stats")
     def vault_stats(session: Db) -> dict:
