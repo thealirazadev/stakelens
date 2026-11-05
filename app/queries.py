@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from app.models import IndexerState, Reorg, VaultEvent
+from app.models import IndexerState, Reconciliation, Reorg, VaultEvent
 
 TOKEN_DECIMALS = 18
 
@@ -143,3 +143,35 @@ def recent_reorgs(session: Session, limit: int = 10) -> list[dict]:
         }
         for row in rows
     ]
+
+
+def staked_total_at(session: Session, block: int) -> int:
+    total = session.scalar(select(func.sum(_stake_delta)).where(VaultEvent.block_number <= block))
+    return int(total or 0)
+
+
+def largest_stakes_at(session: Session, block: int, limit: int) -> list[tuple[str, int]]:
+    staked = func.sum(_stake_delta)
+    rows = session.execute(
+        select(VaultEvent.wallet, staked)
+        .where(VaultEvent.block_number <= block)
+        .group_by(VaultEvent.wallet)
+        .order_by(staked.desc(), VaultEvent.wallet)
+        .limit(limit)
+    ).all()
+    return [(wallet, int(amount)) for wallet, amount in rows]
+
+
+def latest_reconciliation(session: Session) -> dict | None:
+    row = session.scalar(select(Reconciliation).order_by(Reconciliation.id.desc()).limit(1))
+    if row is None:
+        return None
+    return {
+        "checked_at": row.checked_at.isoformat(),
+        "block_number": row.block_number,
+        "ok": row.ok,
+        "onchain_total": _amount(row.onchain_total),
+        "indexed_total": _amount(row.indexed_total),
+        "wallets_checked": row.wallets_checked,
+        "wallets_mismatched": row.wallets_mismatched,
+    }
