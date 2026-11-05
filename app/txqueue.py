@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from web3 import Web3
 from web3.exceptions import ContractLogicError, TransactionNotFound, Web3RPCError
 
-from app.chain import GAS_BUFFER_PERCENT, Endpoints, RpcUnavailable
+from app.chain import Endpoints, RpcUnavailable, with_gas_buffer
 from app.metrics import TX_BROADCASTS, TX_FEE_BUMPS, TX_REORGED
 from app.models import OutboundTx, TxAttempt
 
@@ -149,7 +149,7 @@ class TxWorker:
         if max_fee > self._max_fee:
             log.warning("network fee %d is above the cap, waiting", max_fee)
             return
-        tx.gas_limit = estimate * GAS_BUFFER_PERCENT // 100
+        tx.gas_limit = with_gas_buffer(estimate)
         tx.nonce = self._next_nonce(session, tx.sender)
         attempt = self._sign_attempt(session, tx, max_fee, priority_fee)
         tx.status = "pending"

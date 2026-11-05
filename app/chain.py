@@ -23,10 +23,17 @@ log = logging.getLogger("stakelens.chain")
 
 T = TypeVar("T")
 
-# Gas is estimated against the current block. A vault call landing later costs more, because the
-# reward accumulator and the user's checkpoint go from zero to non-zero. The measured worst case
-# is 41% above the estimate (tests/test_chain_e2e.py). Unused gas is refunded.
-GAS_BUFFER_PERCENT = 160
+# Gas is estimated against the current block. A vault call landing later can cost a fixed amount
+# more, because the reward accumulator, the user's checkpoint, and their accrued reward can each go
+# from zero to non-zero. A percentage alone fails on cheap calls, so this adds a flat allowance.
+# tests/test_chain_e2e.py measures the worst case for every vault action. Unused gas is refunded.
+GAS_BUFFER_PERCENT = 120
+GAS_BUFFER_FLAT = 70_000
+
+
+def with_gas_buffer(estimate: int) -> int:
+    return estimate * GAS_BUFFER_PERCENT // 100 + GAS_BUFFER_FLAT
+
 
 EVENT_SIGNATURES = {
     "Staked": "Staked(address,uint256)",

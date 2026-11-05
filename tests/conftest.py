@@ -51,7 +51,12 @@ def sessions(engine: Engine) -> Iterator[sessionmaker[Session]]:
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(_env_file=None, database_url=TEST_DATABASE_URL, confirmations=3)
+    return Settings(
+        _env_file=None,
+        database_url=TEST_DATABASE_URL,
+        confirmations=3,
+        aggregate_cache_seconds=0,
+    )
 
 
 @pytest.fixture

@@ -8,11 +8,12 @@ from eth_account import Account
 from sqlalchemy import select
 
 from app import queries
-from app.chain import GAS_BUFFER_PERCENT, Web3Chain
+from app.chain import Web3Chain, with_gas_buffer
 from app.indexer import Indexer
 from app.models import Reorg
 from scripts.deploy import ANVIL_DEPLOYER_KEY, E18, send
 from scripts.simulate import STAKER_KEYS
+from scripts.verify import token_constructor_args, vault_constructor_args
 from tests.conftest import RPC_URL
 
 pytestmark = pytest.mark.chain
@@ -105,7 +106,8 @@ def test_fork_to_a_shorter_chain_rolls_back(sessions, w3, deployed):
     assert_matches_contract(sessions, deployed, [alice])
 
 
-def test_gas_buffer_covers_the_worst_case_for_a_new_staker(w3, deployed):
+@pytest.mark.parametrize("action", ["stake", "unstake", "claim"])
+def test_gas_buffer_covers_the_worst_case(w3, deployed, action):
     """The estimate sees no elapsed time, but the transaction lands after some has passed."""
     deployer = Account.from_key(ANVIL_DEPLOYER_KEY)
     alice, bob = (Account.from_key(key) for key in STAKER_KEYS[:2])
@@ -113,19 +115,30 @@ def test_gas_buffer_covers_the_worst_case_for_a_new_staker(w3, deployed):
         send(w3, deployer, deployed.token.functions.transfer(account.address, 1000 * E18))
         send(w3, account, deployed.token.functions.approve(deployed.vault.address, 1000 * E18))
     send(w3, alice, deployed.vault.functions.stake(100 * E18))
+    if action != "stake":
+        send(w3, bob, deployed.vault.functions.stake(50 * E18))
+    if action == "claim":
+        # Earlier rewards so that claiming passes estimation, then a checkpoint with no time since.
+        w3.provider.make_request("evm_increaseTime", [10])
+        w3.provider.make_request("evm_mine", [])
+        send(w3, bob, deployed.vault.functions.unstake(1 * E18))
 
+    calls = {
+        "stake": deployed.vault.functions.stake(5 * E18),
+        "unstake": deployed.vault.functions.unstake(5 * E18),
+        "claim": deployed.vault.functions.claim(),
+    }
     w3.provider.make_request("anvil_setBlockTimestampInterval", [0])
-    call = deployed.vault.functions.stake(5 * E18)
-    estimate = call.estimate_gas({"from": bob.address})
+    estimate = calls[action].estimate_gas({"from": bob.address})
     w3.provider.make_request("anvil_removeBlockTimestampInterval", [])
     w3.provider.make_request("evm_increaseTime", [50])
     w3.provider.make_request("evm_mine", [])
 
-    tx = call.build_transaction(
+    tx = calls[action].build_transaction(
         {
             "from": bob.address,
             "nonce": w3.eth.get_transaction_count(bob.address),
-            "gas": estimate * GAS_BUFFER_PERCENT // 100,
+            "gas": with_gas_buffer(estimate),
         }
     )
     receipt = w3.eth.wait_for_transaction_receipt(
@@ -133,4 +146,20 @@ def test_gas_buffer_covers_the_worst_case_for_a_new_staker(w3, deployed):
     )
 
     assert receipt["status"] == 1
-    assert receipt["gasUsed"] > estimate  # Proves this really is the expensive path.
+    if action != "claim":  # Claim earns a storage refund, so it can land below its estimate.
+        assert receipt["gasUsed"] > estimate  # Proves this really is the expensive path.
+
+
+def test_verification_constructor_args_match_the_real_deployment(w3, deployed):
+    """Etherscan rejects a submission whose constructor args differ from the creation input."""
+
+    def creation_input(contract) -> str:
+        for number in range(w3.eth.block_number, -1, -1):
+            for tx in w3.eth.get_block(number, full_transactions=True)["transactions"]:
+                receipt = w3.eth.get_transaction_receipt(tx["hash"])
+                if receipt["contractAddress"] == contract.address:
+                    return tx["input"].hex()
+        raise AssertionError("creation transaction not found")
+
+    assert creation_input(deployed.token).endswith(token_constructor_args())
+    assert creation_input(deployed.vault).endswith(vault_constructor_args(deployed.token.address))

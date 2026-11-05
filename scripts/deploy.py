@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from web3 import Web3
 from web3.contract import Contract
 
-from app.chain import GAS_BUFFER_PERCENT
+from app.chain import with_gas_buffer
 from app.config import get_settings
 
 ARTIFACTS = Path(__file__).parent.parent / "contracts" / "out"
@@ -52,7 +52,7 @@ def load_contract(w3: Web3, name: str, address: str) -> Contract:
 def send(w3: Web3, account: LocalAccount, call) -> dict:
     """Sign locally, send, and wait. Raises if the transaction reverted."""
     params = {"from": account.address, "nonce": w3.eth.get_transaction_count(account.address)}
-    params["gas"] = call.estimate_gas(params) * GAS_BUFFER_PERCENT // 100
+    params["gas"] = with_gas_buffer(call.estimate_gas(params))
     signed = account.sign_transaction(call.build_transaction(params))
     receipt = w3.eth.wait_for_transaction_receipt(
         w3.eth.send_raw_transaction(signed.raw_transaction)
