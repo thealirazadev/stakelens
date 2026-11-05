@@ -105,11 +105,17 @@ function clock(iso) {
   return iso.slice(0, 19).replace("T", " ");
 }
 
+function reconcileCell(check) {
+  if (!check) return ["not run yet", "muted"];
+  const detail = `at block ${check.block_number}, ${check.wallets_checked} wallets`;
+  return check.ok ? [`matches ${detail}`] : [`MISMATCH ${detail}`, "err"];
+}
+
 async function refresh() {
   try {
-    const [stats, events, stakers, reorgs] = await Promise.all([
+    const [stats, events, stakers, reorgs, reconciliation] = await Promise.all([
       getJson("/vault/stats"), getJson("/vault/events?limit=25"),
-      getJson("/vault/stakers"), getJson("/vault/reorgs"),
+      getJson("/vault/stakers"), getJson("/vault/reorgs"), getJson("/vault/reconciliation"),
     ]);
 
     const sync = $("sync");
@@ -123,6 +129,7 @@ async function refresh() {
       row([["Confirmed"], [`${stats.confirmed_staked.tokens} STK`, "mono"]]),
       row([["Active stakers"], [stats.active_stakers]]),
       row([["Events indexed"], [stats.event_count]]),
+      row([["Check against contract"], reconcileCell(reconciliation)]),
     ], "", 2);
 
     $("events-note").textContent = `confirmed after ${stats.confirmations_required} blocks`;
