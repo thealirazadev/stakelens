@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app import queries
 from app.indexer import DeepReorgError, Indexer
@@ -121,7 +121,7 @@ def test_same_height_fork_is_detected_from_the_tip(sessions):
     assert staked(sessions, BOB) == E18
 
 
-def test_chain_shorter_than_our_tip_rolls_back(sessions):
+def test_chain_getting_shorter_rolls_back_once_a_competing_block_appears(sessions):
     chain = FakeChain()
     chain.mine(("Staked", ALICE, E18))
     chain.mine(("Staked", ALICE, E18))
@@ -130,10 +130,88 @@ def test_chain_shorter_than_our_tip_rolls_back(sessions):
 
     chain.fork_from(1)
     indexer.sync_once()
+    assert staked(sessions, ALICE) == 2 * E18  # No hash disagrees yet.
+
+    chain.mine(("Staked", BOB, E18))
+    drain(indexer)
 
     assert staked(sessions, ALICE) == E18
+    assert staked(sessions, BOB) == E18
+
+
+def test_lagging_backup_node_is_not_mistaken_for_a_reorg(sessions):
+    chain = FakeChain()
+    for _ in range(5):
+        chain.mine(("Staked", ALICE, E18))
+    indexer = make_indexer(sessions, chain)
+    drain(indexer)
+
+    chain.hidden_blocks_above = 2  # The node we failed over to is three blocks behind.
+    result = indexer.sync_once()
+
+    assert result.reorgs == 0
+    assert staked(sessions, ALICE) == 5 * E18
     with sessions() as session:
-        assert session.scalar(select(IndexerState.last_block)) == 1
+        assert session.scalar(select(func.count()).select_from(Reorg)) == 0
+
+    chain.hidden_blocks_above = None
+    chain.mine(("Staked", ALICE, E18))
+    drain(indexer)
+    assert staked(sessions, ALICE) == 6 * E18
+
+
+def test_deep_history_uses_log_ranges_and_far_fewer_calls(sessions):
+    def build() -> FakeChain:
+        chain = FakeChain()
+        for number in range(500):
+            chain.mine(*([("Staked", ALICE, E18)] if number % 100 == 0 else []))
+        return chain
+
+    ranged = build()
+    drain(make_indexer(sessions, ranged, max_reorg_depth=10, batch_size=1000))
+    assert staked(sessions, ALICE) == 5 * E18
+
+    with sessions.begin() as session:
+        for model in (VaultEvent, IndexedBlock, IndexerState):
+            session.execute(delete(model))
+
+    slow = build()
+    drain(make_indexer(sessions, slow, max_reorg_depth=10_000, batch_size=1000))
+    assert staked(sessions, ALICE) == 5 * E18
+
+    assert sum(ranged.calls.values()) * 10 < sum(slow.calls.values())
+
+
+def test_log_range_shrinks_to_fit_the_provider_limit(sessions):
+    chain = FakeChain()
+    for number in range(100):
+        chain.mine(*([("Staked", ALICE, E18)] if number % 7 == 0 else []))
+    chain.max_log_range = 10
+
+    drain(make_indexer(sessions, chain, max_reorg_depth=5, log_range_size=64, batch_size=1000))
+
+    assert staked(sessions, ALICE) == 15 * E18
+    with sessions() as session:
+        assert session.scalar(select(IndexerState.last_block)) == 100
+
+
+def test_reorg_just_above_range_indexed_history_is_handled(sessions):
+    chain = FakeChain()
+    for _ in range(50):
+        chain.mine(("Staked", ALICE, E18))
+    indexer = make_indexer(sessions, chain, max_reorg_depth=10, batch_size=1000)
+    drain(indexer)
+
+    chain.fork_from(45)
+    for _ in range(8):
+        chain.mine(("Staked", BOB, E18))
+    drain(indexer)
+
+    assert staked(sessions, ALICE) == 45 * E18
+    assert staked(sessions, BOB) == 8 * E18
+    with sessions() as session:
+        total = queries.vault_stats(session, 1)["total_staked"]["wei"]
+    assert int(total) == chain.total_staked(chain.head_number())
 
 
 def test_multi_block_reorg_rewinds_to_common_ancestor(sessions):
