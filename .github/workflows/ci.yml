@@ -22,3 +22,14 @@ jobs:
         run: docker run -d -p 127.0.0.1:8546:8545 --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --host 0.0.0.0
       - run: sleep 2
       - run: make test
+
+  slither:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: crytic/slither-action@v0.4.1
+        with:
+          target: contracts/
+          fail-on: high
