@@ -1,7 +1,18 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, DateTime, Index, Numeric, String, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -92,3 +103,58 @@ class AssistantCall(Base):
     input_tokens: Mapped[int] = mapped_column(BigInteger)
     output_tokens: Mapped[int] = mapped_column(BigInteger)
     tool_calls: Mapped[int] = mapped_column(BigInteger)
+
+
+class Reconciliation(Base):
+    __tablename__ = "reconciliations"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    block_number: Mapped[int] = mapped_column(BigInteger)
+    onchain_total: Mapped[Decimal] = mapped_column(Wei)
+    indexed_total: Mapped[Decimal] = mapped_column(Wei)
+    wallets_checked: Mapped[int] = mapped_column(BigInteger)
+    wallets_mismatched: Mapped[int] = mapped_column(BigInteger)
+    ok: Mapped[bool] = mapped_column(Boolean)
+
+
+class OutboundTx(Base):
+    """A transaction the system has been asked to send.
+
+    queued -> pending -> mined -> confirmed | reverted. Terminal failures: failed, dropped.
+    """
+
+    __tablename__ = "outbound_txs"
+    __table_args__ = (Index("ix_outbound_txs_sender_status", "sender", "status", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
+    sender: Mapped[str] = mapped_column(String(42))
+    to_address: Mapped[str] = mapped_column(String(42))
+    data: Mapped[str] = mapped_column(Text)
+    value: Mapped[Decimal] = mapped_column(Wei, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    nonce: Mapped[int | None] = mapped_column(BigInteger)
+    gas_limit: Mapped[int | None] = mapped_column(BigInteger)
+    winning_hash: Mapped[str | None] = mapped_column(String(66))
+    mined_block: Mapped[int | None] = mapped_column(BigInteger)
+    receipt_success: Mapped[bool | None] = mapped_column(Boolean)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TxAttempt(Base):
+    """One signed version of a transaction. Written before broadcast, so a crash loses nothing.
+
+    Fee bumps add attempts under the same nonce. Any of them may be the one that gets mined.
+    """
+
+    __tablename__ = "tx_attempts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tx_id: Mapped[int] = mapped_column(ForeignKey("outbound_txs.id"), index=True)
+    tx_hash: Mapped[str] = mapped_column(String(66), unique=True)
+    raw_tx: Mapped[str] = mapped_column(Text)
+    max_fee_per_gas: Mapped[Decimal] = mapped_column(Wei)
+    max_priority_fee_per_gas: Mapped[Decimal] = mapped_column(Wei)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
