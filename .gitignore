@@ -1,0 +1,10 @@
+.env
+.env.deployment
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+deployments/
