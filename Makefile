@@ -2,7 +2,7 @@ FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:stable
 UID_GID := $(shell id -u):$(shell id -g)
 FORGE := docker run --rm -u $(UID_GID) -e HOME=/work/.foundry-home -v $(CURDIR)/contracts:/work -w /work --entrypoint forge $(FOUNDRY_IMAGE)
 
-.PHONY: up down chain chain-test build test-contracts test deploy indexer api simulate reorg check lint
+.PHONY: txworker verify verify-check benchmark mutation alerts-check up down chain chain-test build test-contracts test deploy indexer api simulate reorg check lint
 
 up:
 	docker compose up -d --wait db
@@ -45,6 +45,24 @@ reorg:
 
 check:
 	uv run python -m scripts.simulate check
+
+txworker:
+	uv run python -m app.txworker run
+
+verify:
+	uv run python -m scripts.verify
+
+verify-check:
+	uv run python -m scripts.verify --check
+
+benchmark:
+	uv run python -m scripts.benchmark
+
+mutation:
+	uv run python -m scripts.mutation_check
+
+alerts-check:
+	docker run --rm -v $(CURDIR)/ops:/ops:ro --entrypoint promtool prom/prometheus:latest check rules /ops/alerts.yml
 
 lint:
 	uv run ruff check .
