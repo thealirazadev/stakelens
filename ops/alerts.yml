@@ -1,0 +1,58 @@
+groups:
+  - name: stakelens
+    rules:
+      - alert: IndexerStopped
+        expr: stakelens_indexer_heartbeat_age_seconds > 120
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The indexer has not completed a pass in over 2 minutes"
+
+      - alert: IndexerFallingBehind
+        expr: stakelens_blocks_behind > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The indexer is {{ $value }} blocks behind the chain head"
+
+      - alert: IndexDoesNotMatchContract
+        # Two consecutive scrapes are not enough: a reorg during a check can fail it once.
+        expr: stakelens_reconcile_ok == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Indexed balances disagree with the contract. Stop trusting the API's numbers."
+
+      - alert: ReconciliationStopped
+        expr: stakelens_reconcile_age_seconds > 600
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No reconciliation has run in over 10 minutes"
+
+      - alert: DeepReorg
+        expr: stakelens_deepest_reorg_blocks > 16
+        labels:
+          severity: warning
+        annotations:
+          summary: "A reorg of {{ $value }} blocks was recorded. Review the confirmation count."
+
+      - alert: RpcErrorsHigh
+        expr: rate(stakelens_rpc_errors_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RPC endpoint {{ $labels.endpoint }} is failing often"
+
+      - alert: TransactionStuck
+        expr: stakelens_tx_oldest_open_age_seconds > 1800
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "An outbound transaction has not been final for over 30 minutes"
