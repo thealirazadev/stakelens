@@ -1,5 +1,7 @@
 import logging
-from collections.abc import Iterator
+import threading
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated
 
@@ -38,6 +40,27 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
 
 
+class ShortCache:
+    """Serves whole-table aggregates for a moment, since they only change when a block arrives.
+
+    The lock also means a burst of requests runs the query once rather than once each.
+    """
+
+    def __init__(self, ttl_seconds: float) -> None:
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+        self._entries: dict[str, tuple[float, object]] = {}
+
+    def get(self, key: str, compute: Callable[[], object]) -> object:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None and time.monotonic() < entry[0]:
+                return entry[1]
+            value = compute()
+            self._entries[key] = (time.monotonic() + self._ttl, value)
+            return value
+
+
 def _checksum(value: str) -> str:
     if not Web3.is_address(value):
         raise ValueError("not a valid Ethereum address")
@@ -63,6 +86,7 @@ def create_app(
         anthropic_client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     app = FastAPI(title="stakelens", version="0.1.0")
+    cache = ShortCache(settings.aggregate_cache_seconds)
 
     def db() -> Iterator[Session]:
         with sessions.begin() as session:
@@ -86,13 +110,7 @@ def create_app(
 
     @app.get("/health")
     def health(session: Db) -> dict:
-        stats = queries.vault_stats(session, settings.confirmations)
-        return {
-            "status": "ok",
-            "chain_head": stats["chain_head"],
-            "last_indexed_block": stats["last_indexed_block"],
-            "blocks_behind": stats["blocks_behind"],
-        }
+        return {"status": "ok", **queries.sync_position(session)}
 
     @app.get("/metrics", include_in_schema=False)
     def metrics(session: Db) -> Response:
@@ -104,7 +122,7 @@ def create_app(
 
     @app.get("/vault/stats")
     def vault_stats(session: Db) -> dict:
-        return queries.vault_stats(session, settings.confirmations)
+        return cache.get("stats", lambda: queries.vault_stats(session, settings.confirmations))
 
     @app.get("/vault/events")
     def vault_events(session: Db, limit: Limit = 50) -> list[dict]:
@@ -112,7 +130,7 @@ def create_app(
 
     @app.get("/vault/stakers")
     def vault_stakers(session: Db, limit: Limit = 10) -> list[dict]:
-        return queries.top_stakers(session, limit)
+        return cache.get(f"stakers:{limit}", lambda: queries.top_stakers(session, limit))
 
     @app.get("/vault/reorgs")
     def vault_reorgs(session: Db, limit: Limit = 10) -> list[dict]:

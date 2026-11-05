@@ -1,10 +1,13 @@
+import time
 from datetime import UTC, datetime, timedelta
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from fastapi.testclient import TestClient
 from sqlalchemy import update
 
 from app.indexer import Indexer
+from app.main import create_app
 from app.models import AuthChallenge, AuthSession
 from tests.fakes import ALICE, BOB, FakeChain
 
@@ -153,3 +156,22 @@ def test_public_read_endpoints(client, sessions):
     assert events[0]["name"] == "Unstaked"
     assert client.get(f"/wallets/{ALICE.lower()}/position").json()["wallet"] == ALICE
     assert client.get("/health").json()["status"] == "ok"
+
+
+def test_aggregates_are_cached_briefly_and_refresh_after(engine, sessions, settings):
+    settings.aggregate_cache_seconds = 0.3
+    client = TestClient(create_app(settings=settings, engine=engine))
+    chain = FakeChain()
+    chain.mine(("Staked", ALICE, E18))
+    indexer = Indexer(sessions, chain)
+    while indexer.sync_once().blocks:
+        pass
+    assert client.get("/vault/stats").json()["total_staked"]["tokens"] == "1"
+
+    chain.mine(("Staked", ALICE, E18))
+    while indexer.sync_once().blocks:
+        pass
+    assert client.get("/vault/stats").json()["total_staked"]["tokens"] == "1"
+
+    time.sleep(0.35)
+    assert client.get("/vault/stats").json()["total_staked"]["tokens"] == "2"

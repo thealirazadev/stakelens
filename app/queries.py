@@ -41,6 +41,15 @@ def _confirmed_up_to(head: int, confirmations: int) -> int:
     return head - confirmations + 1
 
 
+def sync_position(session: Session) -> dict:
+    head, last_block = _chain_position(session)
+    return {
+        "chain_head": head,
+        "last_indexed_block": last_block,
+        "blocks_behind": max(head - last_block, 0),
+    }
+
+
 def vault_stats(session: Session, confirmations: int) -> dict:
     head, last_block = _chain_position(session)
     cutoff = _confirmed_up_to(head, confirmations)

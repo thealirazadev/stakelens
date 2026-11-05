@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     tx_max_fee_gwei: int = 100
     tx_metrics_port: int = 9102
 
+    aggregate_cache_seconds: float = 1.0
+
     siwe_domain: str = "localhost:8010"
     siwe_uri: str = "http://localhost:8010"
     challenge_ttl_seconds: int = 300
