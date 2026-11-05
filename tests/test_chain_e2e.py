@@ -3,40 +3,19 @@
 Needs `make chain-test` and `make build`. Skipped when the node is not reachable.
 """
 
-import os
-
 import pytest
 from eth_account import Account
 from sqlalchemy import select
-from web3 import Web3
 
 from app import queries
-from app.chain import Web3Chain
+from app.chain import GAS_BUFFER_PERCENT, Web3Chain
 from app.indexer import Indexer
 from app.models import Reorg
-from scripts.deploy import ANVIL_DEPLOYER_KEY, ARTIFACTS, E18, deploy, send
+from scripts.deploy import ANVIL_DEPLOYER_KEY, E18, send
 from scripts.simulate import STAKER_KEYS
+from tests.conftest import RPC_URL
 
 pytestmark = pytest.mark.chain
-
-RPC_URL = os.environ.get("TEST_RPC_URL", "http://127.0.0.1:8546")
-
-
-@pytest.fixture
-def w3():
-    node = Web3(Web3.HTTPProvider(RPC_URL))
-    if not node.is_connected():
-        pytest.skip(f"no EVM node at {RPC_URL}")
-    if not ARTIFACTS.exists():
-        pytest.skip("contracts are not compiled")
-    snapshot = node.provider.make_request("evm_snapshot", [])["result"]
-    yield node
-    node.provider.make_request("evm_revert", [snapshot])
-
-
-@pytest.fixture
-def deployed(w3):
-    return deploy(w3, Account.from_key(ANVIL_DEPLOYER_KEY))
 
 
 def stake(w3, deployed, account, tokens):
@@ -120,6 +99,38 @@ def test_fork_to_a_shorter_chain_rolls_back(sessions, w3, deployed):
     drain(indexer)
 
     w3.provider.make_request("evm_revert", [fork_point])
-    indexer.sync_once()
+    w3.provider.make_request("evm_mine", [])
+    drain(indexer)
 
     assert_matches_contract(sessions, deployed, [alice])
+
+
+def test_gas_buffer_covers_the_worst_case_for_a_new_staker(w3, deployed):
+    """The estimate sees no elapsed time, but the transaction lands after some has passed."""
+    deployer = Account.from_key(ANVIL_DEPLOYER_KEY)
+    alice, bob = (Account.from_key(key) for key in STAKER_KEYS[:2])
+    for account in (alice, bob):
+        send(w3, deployer, deployed.token.functions.transfer(account.address, 1000 * E18))
+        send(w3, account, deployed.token.functions.approve(deployed.vault.address, 1000 * E18))
+    send(w3, alice, deployed.vault.functions.stake(100 * E18))
+
+    w3.provider.make_request("anvil_setBlockTimestampInterval", [0])
+    call = deployed.vault.functions.stake(5 * E18)
+    estimate = call.estimate_gas({"from": bob.address})
+    w3.provider.make_request("anvil_removeBlockTimestampInterval", [])
+    w3.provider.make_request("evm_increaseTime", [50])
+    w3.provider.make_request("evm_mine", [])
+
+    tx = call.build_transaction(
+        {
+            "from": bob.address,
+            "nonce": w3.eth.get_transaction_count(bob.address),
+            "gas": estimate * GAS_BUFFER_PERCENT // 100,
+        }
+    )
+    receipt = w3.eth.wait_for_transaction_receipt(
+        w3.eth.send_raw_transaction(bob.sign_transaction(tx).raw_transaction)
+    )
+
+    assert receipt["status"] == 1
+    assert receipt["gasUsed"] > estimate  # Proves this really is the expensive path.

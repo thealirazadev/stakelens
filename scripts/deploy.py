@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from web3 import Web3
 from web3.contract import Contract
 
+from app.chain import GAS_BUFFER_PERCENT
 from app.config import get_settings
 
 ARTIFACTS = Path(__file__).parent.parent / "contracts" / "out"
@@ -19,8 +20,6 @@ E18 = 10**18
 INITIAL_SUPPLY = 10_000_000 * E18
 REWARD_POOL = 100_000 * E18
 REWARD_RATE_PER_SECOND = E18 // 10
-
-GAS_BUFFER_PERCENT = 130
 
 ANVIL_CHAIN_ID = 31337
 # anvil's first default account. Publicly known; never use it outside a local chain.
@@ -53,8 +52,6 @@ def load_contract(w3: Web3, name: str, address: str) -> Contract:
 def send(w3: Web3, account: LocalAccount, call) -> dict:
     """Sign locally, send, and wait. Raises if the transaction reverted."""
     params = {"from": account.address, "nonce": w3.eth.get_transaction_count(account.address)}
-    # The estimate runs against the current block. Vault calls cost more once time has passed,
-    # because the reward accumulator goes from zero to non-zero, so a bare estimate can run out.
     params["gas"] = call.estimate_gas(params) * GAS_BUFFER_PERCENT // 100
     signed = account.sign_transaction(call.build_transaction(params))
     receipt = w3.eth.wait_for_transaction_receipt(

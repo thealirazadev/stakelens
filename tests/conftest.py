@@ -4,19 +4,23 @@ from collections.abc import Iterator
 import pytest
 from alembic import command
 from alembic.config import Config
+from eth_account import Account
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from web3 import Web3
 
 from app.config import Settings
 from app.db import Base, make_session_factory
 from app.main import create_app
+from scripts.deploy import ANVIL_DEPLOYER_KEY, ARTIFACTS, deploy
 
 SERVER_URL = os.environ.get(
     "TEST_DATABASE_SERVER", "postgresql+psycopg://stakelens:stakelens@localhost:55432"
 )
 TEST_DATABASE_URL = f"{SERVER_URL}/stakelens_test"
+RPC_URL = os.environ.get("TEST_RPC_URL", "http://127.0.0.1:8546")
 
 
 @pytest.fixture(scope="session")
@@ -53,3 +57,22 @@ def settings() -> Settings:
 @pytest.fixture
 def client(engine: Engine, sessions, settings: Settings) -> TestClient:
     return TestClient(create_app(settings=settings, engine=engine))
+
+
+@pytest.fixture
+def w3() -> Iterator[Web3]:
+    """A real EVM node, rewound after each test. Skips when none is running."""
+    node = Web3(Web3.HTTPProvider(RPC_URL))
+    if not node.is_connected():
+        pytest.skip(f"no EVM node at {RPC_URL}")
+    if not ARTIFACTS.exists():
+        pytest.skip("contracts are not compiled")
+    snapshot = node.provider.make_request("evm_snapshot", [])["result"]
+    yield node
+    node.provider.make_request("evm_setAutomine", [True])
+    node.provider.make_request("evm_revert", [snapshot])
+
+
+@pytest.fixture
+def deployed(w3: Web3):
+    return deploy(w3, Account.from_key(ANVIL_DEPLOYER_KEY))
