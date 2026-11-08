@@ -196,7 +196,11 @@ class Indexer:
         ancestor = self._find_common_ancestor(session, old_tip)
         depth = old_tip - ancestor
 
-        removed = session.execute(delete(VaultEvent).where(VaultEvent.block_number > ancestor))
+        removed = session.scalars(
+            delete(VaultEvent)
+            .where(VaultEvent.block_number > ancestor)
+            .returning(VaultEvent.wallet)
+        ).all()
         session.execute(delete(IndexedBlock).where(IndexedBlock.number > ancestor))
         state.last_block = ancestor
         session.add(
@@ -204,14 +208,15 @@ class Indexer:
                 old_tip=old_tip,
                 ancestor_block=ancestor,
                 depth=depth,
-                events_removed=removed.rowcount,
+                events_removed=len(removed),
+                wallets_affected=sorted(set(removed)),
             )
         )
         log.warning(
             "reorg: rolled back %d blocks to %d, removed %d events",
             depth,
             ancestor,
-            removed.rowcount,
+            len(removed),
         )
 
     def _find_common_ancestor(self, session: Session, tip: int) -> int:

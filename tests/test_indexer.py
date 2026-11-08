@@ -105,6 +105,7 @@ def test_reorg_during_catch_up_replaces_orphaned_events(sessions):
     with sessions() as session:
         reorg = session.scalar(select(Reorg))
     assert (reorg.old_tip, reorg.ancestor_block, reorg.depth, reorg.events_removed) == (2, 1, 1, 1)
+    assert reorg.wallets_affected == [ALICE]
 
 
 def test_same_height_fork_is_detected_from_the_tip(sessions):
