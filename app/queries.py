@@ -149,6 +149,7 @@ def recent_reorgs(session: Session, limit: int = 10) -> list[dict]:
             "ancestor_block": row.ancestor_block,
             "depth": row.depth,
             "events_removed": row.events_removed,
+            "wallets_affected": list(row.wallets_affected),
         }
         for row in rows
     ]

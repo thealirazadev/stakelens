@@ -76,7 +76,8 @@ TOOLS = [
     ),
     _tool(
         "get_recent_reorgs",
-        "Chain reorganisations the indexer handled, newest first: depth and events removed.",
+        "Chain reorganisations the indexer handled, newest first: depth, events removed, and the "
+        "wallets whose events were removed.",
         {"limit": _LIMIT},
     ),
 ]
