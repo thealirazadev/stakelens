@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    ARRAY,
     BigInteger,
     Boolean,
     DateTime,
@@ -72,6 +73,10 @@ class Reorg(Base):
     ancestor_block: Mapped[int] = mapped_column(BigInteger)
     depth: Mapped[int] = mapped_column(BigInteger)
     events_removed: Mapped[int] = mapped_column(BigInteger)
+    # Wallets whose events were removed, so "did that reorg touch my balance?" has an answer.
+    wallets_affected: Mapped[list[str]] = mapped_column(
+        ARRAY(String(42)), server_default="{}", default=list
+    )
 
 
 class AuthChallenge(Base):
