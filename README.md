@@ -131,6 +131,8 @@ The backend tests use real Postgres. Reorg logic is covered twice: against a fak
 
 The assistant's tests run the real Anthropic SDK against a local stub. They check the requests and the tool loop, not the quality of the answers.
 
+`make assistant-eval` checks the answers themselves with a real model, against the live indexed data: the exact figures for a wallet, the vault total, and the largest staker; an empty wallet; refusing to send a transaction, give investment advice, or invent an APY; and using the reorg tool. Every expected figure is read from the database at run time. On 2026-11-09, after `make simulate`, `claude-opus-5-5` (the default) and `claude-sonnet-5-5` both passed 8 of 8. With every balance still pending (`CONFIRMATIONS` set very high), the assistant also warned that a reorg could undo the stake. These runs went through the Claude Code CLI rather than an API key.
+
 ## API
 
 | Route | Auth | |
