@@ -2,7 +2,7 @@ FOUNDRY_IMAGE := ghcr.io/foundry-rs/foundry:stable
 UID_GID := $(shell id -u):$(shell id -g)
 FORGE := docker run --rm -u $(UID_GID) -e HOME=/work/.foundry-home -v $(CURDIR)/contracts:/work -w /work --entrypoint forge $(FOUNDRY_IMAGE)
 
-.PHONY: txworker verify verify-check benchmark mutation alerts-check up down chain chain-test build test-contracts test deploy indexer api simulate reorg check lint
+.PHONY: txworker verify verify-check benchmark mutation alerts-check up down chain chain-test build test-contracts test deploy indexer api simulate reorg check lint assistant-eval
 
 up:
 	docker compose up -d --wait db
@@ -27,6 +27,10 @@ test-contracts:
 
 test:
 	uv run pytest -q
+
+# Real-model answer checks over the indexed data; needs ANTHROPIC_API_KEY and a caught-up indexer.
+assistant-eval:
+	uv run python -m scripts.assistant_eval
 
 deploy: build
 	uv run python -m scripts.deploy
