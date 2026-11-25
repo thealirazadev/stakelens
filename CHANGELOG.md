@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Sign-in deletes expired challenges when a new challenge is made, and expired sessions when a
+  new session starts. Challenges are created without authentication, so before this the table
+  grew with every request forever.
+
 ## 2026-11-09
 
 - Reorg records list the wallets whose events were removed (`wallets_affected`), in
