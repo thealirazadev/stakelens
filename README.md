@@ -50,7 +50,7 @@ StakingVault.sol  --events-->  indexer  --writes-->  Postgres  <--reads--  FastA
 
 **Amounts are integers.** Wei is stored as `NUMERIC(78,0)` and formatted with integer maths.
 
-**The server writes the sign-in message.** It stores the exact text the wallet signs and recovers the signer from that copy, so no client-supplied message is ever parsed. A failed attempt still uses up the nonce.
+**The server writes the sign-in message.** It stores the exact text the wallet signs and recovers the signer from that copy, so no client-supplied message is ever parsed. A failed attempt still uses up the nonce. Anyone can ask for a challenge, so expired challenges and sessions are deleted as new ones are made and the tables only hold live rows.
 
 **The assistant doesn't do arithmetic.** Every figure comes from a tool backed by the same queries as the API. The tool loop is capped, questions are limited per wallet per hour, and token usage is recorded for each call.
 

@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -28,6 +28,9 @@ def _iso(moment: datetime) -> str:
 
 def create_challenge(session: Session, settings: Settings, address: str) -> AuthChallenge:
     now = datetime.now(UTC)
+    # Anyone can ask for a challenge, so finished ones are deleted as new ones are made instead
+    # of piling up forever. An expired nonce is refused whether or not its row still exists.
+    session.execute(delete(AuthChallenge).where(AuthChallenge.expires_at <= now))
     nonce = secrets.token_hex(16)
     expires_at = now + timedelta(seconds=settings.challenge_ttl_seconds)
     message = (
@@ -75,6 +78,8 @@ def verify_challenge(
 
     token = secrets.token_urlsafe(32)
     expires_at = now + timedelta(seconds=settings.session_ttl_seconds)
+    # Same for sessions: an expired token is refused either way, so its row is only clutter.
+    session.execute(delete(AuthSession).where(AuthSession.expires_at <= now))
     session.add(AuthSession(token_hash=_hash(token), address=address, expires_at=expires_at))
     return token, address, expires_at
 

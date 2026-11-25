@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.indexer import Indexer
 from app.main import create_app
@@ -116,6 +116,39 @@ def test_expired_session_is_rejected(client, sessions):
     response = client.get("/me/position", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 401
+
+
+def test_expired_challenges_are_deleted_when_a_new_one_is_made(client, sessions):
+    stale = challenge(client)
+    live = challenge(client)
+    with sessions.begin() as session:
+        session.execute(
+            update(AuthChallenge)
+            .where(AuthChallenge.nonce == stale["nonce"])
+            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+
+    fresh = challenge(client)
+
+    with sessions() as session:
+        nonces = set(session.scalars(select(AuthChallenge.nonce)))
+    assert nonces == {live["nonce"], fresh["nonce"]}
+
+
+def test_expired_sessions_are_deleted_when_a_new_one_starts(client, sessions):
+    sign_in(client)
+    with sessions.begin() as session:
+        session.execute(
+            update(AuthSession).values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+
+    token = sign_in(client, OTHER_WALLET)
+
+    with sessions() as session:
+        addresses = list(session.scalars(select(AuthSession.address)))
+    assert addresses == [OTHER_WALLET.address]
+    response = client.get("/me/position", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
 
 
 def test_session_tokens_are_not_stored_in_plain_text(client, sessions):
